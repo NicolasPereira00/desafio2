@@ -2,13 +2,13 @@ const express = require('express');
 const bodyParser = require('body-parser');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
+const bcrypt = require('bcrypt');
 
 const app = express();
 const port = 3000;
 
 let users = [];
 
-// Carrega os usuários do arquivo JSON, se existir
 const loadUsers = () => {
     try {
         const data = fs.readFileSync('users.json', 'utf-8');
@@ -18,7 +18,6 @@ const loadUsers = () => {
     }
 };
 
-// Salva os usuários no arquivo JSON
 const saveUsers = () => {
     try {
         const jsonData = JSON.stringify(users, null, 2);
@@ -29,11 +28,8 @@ const saveUsers = () => {
 };
 
 app.use(bodyParser.json());
-
-// Carrega os usuários ao iniciar o servidor
 loadUsers();
 
-// Middleware para autenticação
 const authenticateToken = (req, res, next) => {
     const token = req.headers['authorization'];
 
@@ -50,33 +46,30 @@ const authenticateToken = (req, res, next) => {
     });
 };
 
-// Endpoint cadastro
-app.post('/signup', (req, res) => {
+app.post('/signup', async (req, res) => {
     const { nome, email, senha, telefones } = req.body;
 
-    // Verifica e-mail
     if (users.find(user => user.email === email)) {
         return res.status(400).json({ mensagem: 'E-mail já cadastrado' });
     }
 
+    const hashedPassword = await bcrypt.hash(senha, 10);
+
     const user = {
-        id: Math.random().toString(36).substr(2, 9), // Gerando um ID
+        id: Math.random().toString(36).substr(2, 9),
         nome,
         email,
-        senha,
+        senha: hashedPassword,
         telefones,
         data_criacao: new Date(),
         data_atualizacao: new Date(),
         ultimo_login: new Date(),
     };
 
-    // Gerando um token (JWT)
     const token = jwt.sign(user, 'secreto', { expiresIn: '30m' });
     user.token = token;
 
     users.push(user);
-
-    // Salva os usuários no arquivo JSON
     saveUsers();
 
     res.json({
@@ -88,23 +81,21 @@ app.post('/signup', (req, res) => {
     });
 });
 
-// Endpoint autenticação
-app.post('/signin', (req, res) => {
+app.post('/signin', async (req, res) => {
     const { email, senha } = req.body;
 
-    const user = users.find(u => u.email === email && u.senha === senha);
+    const user = users.find(u => u.email === email);
 
-    if (!user) {
+    if (!user || !(await bcrypt.compare(senha, user.senha))) {
         return res.status(401).json({ mensagem: 'Usuário e/ou senha inválidos' });
     }
 
-    // Atualizando informacao e gerando novo token 
     user.data_atualizacao = new Date();
     user.ultimo_login = new Date();
+
     const token = jwt.sign(user, 'secreto', { expiresIn: '30m' });
     user.token = token;
 
-    // Salva os usuários no arquivo JSON
     saveUsers();
 
     res.json({
@@ -116,12 +107,10 @@ app.post('/signin', (req, res) => {
     });
 });
 
-// Usuário autenticado
 app.get('/me', authenticateToken, (req, res) => {
     res.json(req.user);
 });
 
-// Rota não encontrada
 app.use((req, res) => {
     res.status(404).json({ mensagem: 'Endpoint não encontrado' });
 });
